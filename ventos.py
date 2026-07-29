@@ -1,7 +1,6 @@
 import streamlit as st
 import math
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
 # ==========================================
 # FUNÇÕES DE CÁLCULO E INTERPOLAÇÃO
@@ -77,49 +76,102 @@ def obter_cpe_telhado_duas_aguas(h_b, beta):
         '90': {'EF': interpolar_telhado(beta, v90_ef), 'GH': interpolar_telhado(beta, v90_gh)}
     }
 
-def calcular_resultante(cpe, cpi, q):
+def calc_res_val(cpe, cpi, q):
+    """Retorna o valor numérico puro para plotagem."""
+    if isinstance(cpe, tuple):
+        return q * (cpe[0] - cpi) # Pega a primeira situação para o gráfico
+    return q * (cpe - cpi)
+
+def format_res(cpe, cpi, q):
+    """Retorna a string formatada para exibição em texto."""
     if isinstance(cpe, tuple):
         r1 = q * (cpe[0] - cpi)
         r2 = q * (cpe[1] - cpi)
         return f"**{r1:.2f}** ou **{r2:.2f}**"
-    else:
-        return f"**{(q * (cpe - cpi)):.2f}**"
+    return f"**{(q * (cpe - cpi)):.2f}**"
 
 # ==========================================
-# GERADOR DE GRÁFICOS (MATPLOTLIB)
+# GERADOR DE GRÁFICOS (DIAGRAMAS DE CARGA)
 # ==========================================
-def plot_esquema_vento(dim_a, dim_b):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+def desenhar_carga(ax, x1, y1, x2, y2, val, arrow_len, label=""):
+    """Desenha setas perpendiculares indicando a carga distribuída."""
+    if val == 0: return
     
-    # Desenho Vento a 0°
-    ax1.add_patch(patches.Rectangle((0, 0), dim_a, dim_b, fill=True, color='#e2e8f0', ec='black'))
-    ax1.set_xlim(-dim_a*0.3, dim_a*1.3)
-    ax1.set_ylim(-dim_b*0.5, dim_b*1.5)
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
     
-    ax1.text(dim_a/2, -dim_b*0.1, 'Face C', va='top', ha='center', color='#1d4ed8', fontweight='bold', fontsize=10)
-    ax1.text(dim_a/2, dim_b*1.1, 'Face D', va='bottom', ha='center', color='#b91c1c', fontweight='bold', fontsize=10)
-    ax1.text(-dim_a*0.05, dim_b/2, 'Face A', va='center', ha='right', fontsize=9)
-    ax1.text(dim_a*1.05, dim_b/2, 'Face B', va='center', ha='left', fontsize=9)
+    # Vetor Normal (Apontando para FORA, percurso horário)
+    nx, ny = -dy / length, dx / length
     
-    # Seta do vento 0° (Vem de baixo para cima)
-    ax1.arrow(dim_a/2, -dim_b*0.4, 0, dim_b*0.2, head_width=dim_a*0.05, head_length=dim_b*0.08, fc='#1d4ed8', ec='#1d4ed8')
-    ax1.set_title("Vento a 0°", fontweight='bold')
-    ax1.axis('off')
+    cor = "#ef4444" if val < 0 else "#3b82f6" # Vermelho para sucção, Azul para pressão
     
-    # Desenho Vento a 90°
-    ax2.add_patch(patches.Rectangle((0, 0), dim_a, dim_b, fill=True, color='#e2e8f0', ec='black'))
-    ax2.set_xlim(-dim_a*0.3, dim_a*1.3)
-    ax2.set_ylim(-dim_b*0.5, dim_b*1.5)
+    for i in [0.2, 0.5, 0.8]:
+        px, py = x1 + dx * i, y1 + dy * i
+        
+        if val < 0: # Sucção: Seta sai da superfície apontando para fora
+            start = (px, py)
+            end = (px + nx * arrow_len, py + ny * arrow_len)
+        else: # Pressão: Seta vem de fora e aponta para a superfície
+            start = (px + nx * arrow_len, py + ny * arrow_len)
+            end = (px, py)
+            
+        ax.annotate("", xy=end, xytext=start, arrowprops=dict(arrowstyle="->", color=cor, lw=1.5))
+        
+    ax.text(cx + nx * arrow_len * 1.5, cy + ny * arrow_len * 1.5, f"{val:.1f}",
+            ha='center', va='center', fontsize=9, color=cor, weight="bold", 
+            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
     
-    ax2.text(dim_a/2, -dim_b*0.1, 'Face C', va='top', ha='center', fontsize=9)
-    ax2.text(dim_a/2, dim_b*1.1, 'Face D', va='bottom', ha='center', fontsize=9)
-    ax2.text(-dim_a*0.05, dim_b/2, 'Face A', va='center', ha='right', color='#1d4ed8', fontweight='bold', fontsize=10)
-    ax2.text(dim_a*1.05, dim_b/2, 'Face B', va='center', ha='left', color='#b91c1c', fontweight='bold', fontsize=10)
+    if label:
+        ax.text(cx - nx * arrow_len * 0.5, cy - ny * arrow_len * 0.5, label, 
+                ha='center', va='center', fontsize=8, color="black")
+
+def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, titulo, is_vento_90=True):
+    fig, ax = plt.subplots(figsize=(5, 4))
     
-    # Seta do vento 90° (Vem da esquerda para a direita)
-    ax2.arrow(-dim_a*0.25, dim_b/2, dim_a*0.15, 0, head_width=dim_b*0.08, head_length=dim_a*0.05, fc='#1d4ed8', ec='#1d4ed8')
-    ax2.set_title("Vento a 90°", fontweight='bold')
-    ax2.axis('off')
+    # Coordenadas do perfil da casa (Percurso Horário para normalizar vetores)
+    x = [0, 0, dim_b/2, dim_b, dim_b]
+    y = [0, dim_h, dim_h + dim_h1, dim_h, 0]
+    
+    # Desenha o contorno da edificação
+    ax.plot(x, y, color='black', linewidth=2)
+    ax.fill_between([0, dim_b], [0, 0], [dim_h, dim_h], color='#f1f5f9')
+    ax.fill_between([0, dim_b/2, dim_b], [dim_h, dim_h+dim_h1, dim_h], [dim_h, dim_h, dim_h], color='#e2e8f0')
+
+    arrow_len = max(dim_b, dim_h + dim_h1) * 0.15
+
+    # Aplica as cargas nas 4 faces visíveis no corte
+    # 1. Parede Esquerda (0,0) -> (0,h)
+    l_esq = "Face A" if is_vento_90 else "Face C"
+    desenhar_carga(ax, 0, 0, 0, dim_h, p_esq, arrow_len, l_esq)
+    
+    # 2. Telhado Esquerdo (0,h) -> (b/2, h+h1)
+    l_tesq = "Zonas E/F" if is_vento_90 else "Zonas E/G"
+    desenhar_carga(ax, 0, dim_h, dim_b/2, dim_h + dim_h1, p_tesq, arrow_len, l_tesq)
+    
+    # 3. Telhado Direito (b/2, h+h1) -> (b,h)
+    l_tdir = "Zonas G/H" if is_vento_90 else "Zonas F/H"
+    desenhar_carga(ax, dim_b/2, dim_h + dim_h1, dim_b, dim_h, p_tdir, arrow_len, l_tdir)
+    
+    # 4. Parede Direita (b,h) -> (b,0)
+    l_dir = "Face B" if is_vento_90 else "Face D"
+    desenhar_carga(ax, dim_b, dim_h, dim_b, 0, p_dir, arrow_len, l_dir)
+
+    # Seta indicadora do Vento Global
+    if is_vento_90:
+        ax.annotate("Vento", xy=(0, dim_h/2), xytext=(-dim_b*0.4, dim_h/2),
+                    arrowprops=dict(facecolor='black', shrink=0.05, width=3, headwidth=10))
+    else:
+        ax.annotate("Vento (Entrando no Plano)", xy=(dim_b/2, dim_h/2), xytext=(dim_b/2, dim_h/2),
+                    bbox=dict(boxstyle="circle", fc="black"), color="white", weight="bold", ha='center', va='center')
+
+    ax.set_aspect('equal')
+    ax.axis('off')
+    ax.set_title(titulo, pad=20, fontweight='bold')
+    
+    # Limites para acomodar as setas
+    ax.set_xlim(-dim_b*0.5, dim_b*1.5)
+    ax.set_ylim(0, dim_h + dim_h1 + dim_b*0.3)
     
     return fig
 
@@ -136,10 +188,15 @@ with st.sidebar:
     dim_a = st.number_input("Maior dim. em planta 'a' (m)", value=24.0)
     dim_b = st.number_input("Menor dim. em planta 'b' (m)", value=12.0)
     dim_h = st.number_input("Altura do pilar 'h' (m)", value=5.0)
-    dim_h1 = st.number_input("Altura da cumeeira 'h1' (m)", value=1.5)
+    dim_h1 = st.number_input("Altura da cumeeira/desnível 'h1' (m)", value=1.5)
     angulo_beta = st.number_input("Ângulo do telhado 'β' (°)", value=14.0)
     
     st.subheader("2. Fatores de Vento")
+    
+    with st.expander("Visualizar Mapa V0"):
+        try: st.image("isopletas.png", use_container_width=True)
+        except: st.warning("Faça o upload de 'isopletas.png'")
+            
     v0 = st.number_input("Veloc. Básica V0 (m/s)", value=45.0)
     s1 = st.number_input("Fator Topográfico S1", value=1.0)
     
@@ -152,7 +209,6 @@ with st.sidebar:
     idx_s3 = st.selectbox("Grupo S3", range(len(s3_labels)), format_func=lambda x: s3_labels[x], index=2)
 
     st.subheader("3. Pressão Interna (Cpi)")
-    st.markdown("Insira os limites de $C_{pi}$ para cálculo das combinações:")
     cpi_positivo = st.number_input("Cpi (Condição Positiva)", value=0.2)
     cpi_negativo = st.number_input("Cpi (Condição Negativa)", value=-0.3)
 
@@ -175,11 +231,7 @@ cpe_telhado = obter_cpe_telhado_duas_aguas(rel_h_b, angulo_beta)
 st.title("Forças de Vento - NBR 6123")
 st.markdown("Cálculo estruturado das forças estáticas devidas ao vento em edificações retangulares.")
 
-st.header("1. Esquema da Edificação e Pressão Dinâmica")
-# Exibe o gráfico gerado com Matplotlib
-fig_esquema = plot_esquema_vento(dim_a, dim_b)
-st.pyplot(fig_esquema)
-
+st.header("1. Pressão Dinâmica")
 col1, col2, col3 = st.columns(3)
 col1.metric("Velocidade Característica (Vk)", f"{vk:.2f} m/s")
 col2.metric("Pressão Dinâmica (q)", f"{q:.2f} N/m²")
@@ -187,54 +239,92 @@ col3.metric("Fatores Utilizados", f"S1={s1:.2f} | S2={s2:.2f} | S3={s3:.2f}")
 
 st.divider()
 
-st.header("2. Coeficientes de Pressão Externa ($C_{pe}$)")
+st.header("2. Coeficientes de Pressão Externa (Cpe)")
 col_p, col_t = st.columns(2)
 
 with col_p:
     st.subheader("Paredes")
+    with st.expander("Ver Imagem da Norma (Paredes)"):
+        try: st.image("cpe_paredes.png", use_container_width=True)
+        except: st.warning("Faça upload de 'cpe_paredes.png'")
+
     st.write("**Vento a 0°**")
     st.write(f"- Face C (Frente): {cpe_paredes['0']['C']} | Face D (Fundos): {cpe_paredes['0']['D']}")
+    st.write(f"- Laterais A/B: Z1= {cpe_paredes['0']['A1_B1']} | Z2= {cpe_paredes['0']['A2_B2']} | Z3= {cpe_paredes['0']['A3_B3']}")
+    
     st.write("**Vento a 90°**")
     st.write(f"- Face A (Frente): {cpe_paredes['90']['A']} | Face B (Fundos): {cpe_paredes['90']['B']}")
+    st.write(f"- Laterais C/D: Z1= {cpe_paredes['90']['C1_D1']} | Z2= {cpe_paredes['90']['C2_D2']}")
 
 with col_t:
     st.subheader("Telhado")
     if tipo_telhado == "Duas águas":
+        with st.expander("Ver Imagem da Norma (Duas Águas)"):
+            try: st.image("cpe_telhado_2_aguas.png", use_container_width=True)
+            except: st.warning("Faça upload de 'cpe_telhado_2_aguas.png'")
+                
         st.write("**Vento a 0°**")
-        st.write(f"- E/G: {cpe_telhado['0']['EG']} | F/H: {cpe_telhado['0']['FH']}")
+        st.write(f"- E/G: {cpe_telhado['0']['EG']} | F/H: {cpe_telhado['0']['FH']} | I/J: {cpe_telhado['0']['IJ']}")
         st.write("**Vento a 90°**")
-        st.write(f"- Barlavento (E/F): {cpe_telhado['90']['EF']}")
+        st.write(f"- Barlavento (E/F): {cpe_telhado['90']['EF']} *(Verificar Situações)*")
         st.write(f"- Sotavento (G/H): {cpe_telhado['90']['GH']}")
+    else:
+        with st.expander("Ver Imagem da Norma (Uma Água)"):
+            try: st.image("cpe_telhado_1_agua.png", use_container_width=True)
+            except: st.warning("Faça upload de 'cpe_telhado_1_agua.png'")
+        st.info("Valores para telhado de uma água requerem implementação matemática da Tabela 8.")
 
 st.divider()
 
-st.header("3. Esforços Resultantes Finais ($\Delta p$)")
-st.markdown("A equação aplicada para o cálculo das faces é $\Delta p = q \times (C_{pe} - C_{pi})$. Valores expressos em **$\text{N/m}^2$**.")
+st.header("3. Esforços Resultantes Finais (Δp)")
+st.markdown("As setas representam o sentido real da força. **Vermelho indica Sucção** (empurrando para fora) e **Azul indica Pressão** (empurrando para dentro). Valores em **N/m²**.")
 
 abas_result = st.tabs([f"Combinação 1 (Cpi = {cpi_positivo})", f"Combinação 2 (Cpi = {cpi_negativo})"])
 
+# Combinação 1
 with abas_result[0]:
-    col_r1, col_r2 = st.columns(2)
-    with col_r1:
-        st.markdown("### Vento a 0°")
-        st.write(f"- **Parede C (Barlavento):** {calcular_resultante(cpe_paredes['0']['C'], cpi_positivo, q)}")
-        st.write(f"- **Parede D (Sotavento):** {calcular_resultante(cpe_paredes['0']['D'], cpi_positivo, q)}")
-        st.write(f"- **Telhado (Zonas E/G):** {calcular_resultante(cpe_telhado['0']['EG'], cpi_positivo, q)}")
-    with col_r2:
-        st.markdown("### Vento a 90°")
-        st.write(f"- **Parede A (Barlavento):** {calcular_resultante(cpe_paredes['90']['A'], cpi_positivo, q)}")
-        st.write(f"- **Parede B (Sotavento):** {calcular_resultante(cpe_paredes['90']['B'], cpi_positivo, q)}")
-        st.write(f"- **Telhado (Zonas E/F):** {calcular_resultante(cpe_telhado['90']['EF'], cpi_positivo, q)}")
+    if tipo_telhado == "Duas águas":
+        col_graf_0, col_graf_90 = st.columns(2)
+        
+        with col_graf_0:
+            v0_pesq = calc_res_val(cpe_paredes['0']['C'], cpi_positivo, q)
+            v0_pdir = calc_res_val(cpe_paredes['0']['D'], cpi_positivo, q)
+            v0_tesq = calc_res_val(cpe_telhado['0']['EG'], cpi_positivo, q)
+            v0_tdir = calc_res_val(cpe_telhado['0']['FH'], cpi_positivo, q)
+            
+            fig_0 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq, v0_pdir, v0_tesq, v0_tdir, "Vento a 0°", is_vento_90=False)
+            st.pyplot(fig_0)
+            
+        with col_graf_90:
+            v90_pesq = calc_res_val(cpe_paredes['90']['A'], cpi_positivo, q)
+            v90_pdir = calc_res_val(cpe_paredes['90']['B'], cpi_positivo, q)
+            v90_tesq = calc_res_val(cpe_telhado['90']['EF'], cpi_positivo, q)
+            v90_tdir = calc_res_val(cpe_telhado['90']['GH'], cpi_positivo, q)
+            
+            fig_90 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq, v90_pdir, v90_tesq, v90_tdir, "Vento a 90°", is_vento_90=True)
+            st.pyplot(fig_90)
+    else:
+        st.write("Gráficos de carregamento disponíveis apenas para telhado de duas águas nesta versão.")
 
+# Combinação 2
 with abas_result[1]:
-    col_r3, col_r4 = st.columns(2)
-    with col_r3:
-        st.markdown("### Vento a 0°")
-        st.write(f"- **Parede C (Barlavento):** {calcular_resultante(cpe_paredes['0']['C'], cpi_negativo, q)}")
-        st.write(f"- **Parede D (Sotavento):** {calcular_resultante(cpe_paredes['0']['D'], cpi_negativo, q)}")
-        st.write(f"- **Telhado (Zonas E/G):** {calcular_resultante(cpe_telhado['0']['EG'], cpi_negativo, q)}")
-    with col_r4:
-        st.markdown("### Vento a 90°")
-        st.write(f"- **Parede A (Barlavento):** {calcular_resultante(cpe_paredes['90']['A'], cpi_negativo, q)}")
-        st.write(f"- **Parede B (Sotavento):** {calcular_resultante(cpe_paredes['90']['B'], cpi_negativo, q)}")
-        st.write(f"- **Telhado (Zonas E/F):** {calcular_resultante(cpe_telhado['90']['EF'], cpi_negativo, q)}")
+    if tipo_telhado == "Duas águas":
+        col_graf_0_c2, col_graf_90_c2 = st.columns(2)
+        
+        with col_graf_0_c2:
+            v0_pesq_c2 = calc_res_val(cpe_paredes['0']['C'], cpi_negativo, q)
+            v0_pdir_c2 = calc_res_val(cpe_paredes['0']['D'], cpi_negativo, q)
+            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['EG'], cpi_negativo, q)
+            v0_tdir_c2 = calc_res_val(cpe_telhado['0']['FH'], cpi_negativo, q)
+            
+            fig_0_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq_c2, v0_pdir_c2, v0_tesq_c2, v0_tdir_c2, "Vento a 0°", is_vento_90=False)
+            st.pyplot(fig_0_c2)
+            
+        with col_graf_90_c2:
+            v90_pesq_c2 = calc_res_val(cpe_paredes['90']['A'], cpi_negativo, q)
+            v90_pdir_c2 = calc_res_val(cpe_paredes['90']['B'], cpi_negativo, q)
+            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['EF'], cpi_negativo, q)
+            v90_tdir_c2 = calc_res_val(cpe_telhado['90']['GH'], cpi_negativo, q)
+            
+            fig_90_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq_c2, v90_pdir_c2, v90_tesq_c2, v90_tdir_c2, "Vento a 90°", is_vento_90=True)
+            st.pyplot(fig_90_c2)

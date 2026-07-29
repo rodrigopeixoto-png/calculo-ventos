@@ -1,11 +1,82 @@
 import streamlit as st
 import math
 
-# Configuração inicial da página
+# ==========================================
+# FUNÇÕES DE CÁLCULO
+# ==========================================
+def interp_linear(x, x1, x2, y1, y2):
+    """Realiza a interpolação linear simples entre dois pontos."""
+    if x == x1: return y1
+    if x == x2: return y2
+    return y1 + ((x - x1) * (y2 - y1) / (x2 - x1))
+
+def obter_cpe_paredes(h_b, a_b):
+    """
+    Retorna os Cpe globais e laterais baseado na Tabela 4 da NBR 6123.
+    """
+    # 1. Interpolação para faces de Barlavento e Sotavento
+    if h_b <= 0.5:
+        c_0 = 0.7; c_90 = 0.7
+        d_0 = -0.3 
+        b_90 = -0.5 if a_b <= 1 else -0.3 
+    elif h_b >= 1.5:
+        c_0 = 0.8; c_90 = 0.8
+        d_0 = -0.6; b_90 = -0.6
+    else:
+        c_0 = interp_linear(h_b, 0.5, 1.5, 0.7, 0.8)
+        c_90 = c_0
+        d_0 = interp_linear(h_b, 0.5, 1.5, -0.3, -0.6)
+        b_ref_05 = -0.5 if a_b <= 1 else -0.3
+        b_90 = interp_linear(h_b, 0.5, 1.5, b_ref_05, -0.6)
+        
+    # 2. Definição das zonas laterais (Sucção)
+    # Vento 0° (Laterais são A e B)
+    if a_b <= 1:
+        a1_b1 = -0.8
+        a2_b2 = -0.4
+        a3_b3 = -0.3 
+    elif a_b <= 2:
+        a1_b1 = -0.8
+        a2_b2 = -0.4
+        a3_b3 = -0.2
+    else: 
+        a1_b1 = -0.8
+        a2_b2 = -0.4
+        a3_b3 = -0.2 
+        
+    # Vento 90° (Laterais são C e D)
+    if h_b <= 0.5:
+        c1_d1 = -0.9
+        c2_d2 = -0.5
+    elif h_b >= 1.5:
+        c1_d1 = -0.9
+        c2_d2 = -0.5
+    else:
+        c1_d1 = -0.9
+        c2_d2 = -0.5
+
+    return {
+        'vento_0': {
+            'Barlavento_C': round(c_0, 2), 
+            'Sotavento_D': round(d_0, 2),
+            'Lateral_A1_B1': round(a1_b1, 2),
+            'Lateral_A2_B2': round(a2_b2, 2),
+            'Lateral_A3_B3': round(a3_b3, 2)
+        },
+        'vento_90': {
+            'Barlavento_A': round(c_90, 2), 
+            'Sotavento_B': round(b_90, 2),
+            'Lateral_C1_D1': round(c1_d1, 2),
+            'Lateral_C2_D2': round(c2_d2, 2)
+        }
+    }
+
+# ==========================================
+# CONFIGURAÇÃO INICIAL DA PÁGINA E VARIÁVEIS
+# ==========================================
 st.set_page_config(page_title="Cálculo de Vento - NBR 6123", layout="wide")
 st.title("Cálculo da Força de Ventos em Edificações (NBR 6123)")
 
-# Criação das abas
 abas = st.tabs([
     "Geometria", 
     "Velocidade Básica", 
@@ -15,7 +86,6 @@ abas = st.tabs([
     "Cálculo e Esforços"
 ])
 
-# --- Dicionários de Dados da NBR 6123 ---
 s3_valores = {
     "1 - Hospitais, quartéis, centrais de comunicação": 1.10,
     "2 - Hotéis, residências, comércio com alta ocupação": 1.00,
@@ -32,7 +102,6 @@ s2_params = {
     "V - Terrenos com obstáculos altos (centros de grandes cidades)": {"A": (0.74, 0.15), "B": (0.73, 0.16), "C": (0.71, 0.17)}
 }
 
-# Inicialização de variáveis globais
 if 'altura_z' not in st.session_state:
     st.session_state['altura_z'] = 5.0
 if 'maior_dimensao' not in st.session_state:
@@ -46,7 +115,6 @@ if 'tipo_telhado' not in st.session_state:
 with abas[0]:
     st.header("Dimensões da Edificação")
     
-    # Adicionado o seletor de tipo de cobertura
     tipo_telhado = st.radio("Tipo de Cobertura:", ["Duas águas", "Uma água"], horizontal=True)
     st.session_state['tipo_telhado'] = tipo_telhado
     
@@ -58,16 +126,12 @@ with abas[0]:
         dim_b = st.number_input("Menor dimensão 'b' (m)", value=12.0, step=1.0)
     with col2:
         dim_h = st.number_input("Altura do pilar 'h' (m)", value=5.0, step=0.5)
-        
-        # O rótulo muda de acordo com o tipo de telhado escolhido
         label_h1 = "Altura da cumeeira 'h1' (m)" if tipo_telhado == "Duas águas" else "Desnível do telhado 'h1' (m)"
         dim_h1 = st.number_input(label_h1, value=1.5, step=0.1)
-        
     with col3:
         dist_porticos = st.number_input("Distância entre pórticos 'p' (m)", value=6.0, step=1.0)
         angulo_beta = st.number_input("Ângulo do telhado 'β' (°)", value=14.0, step=1.0)
     
-    # Atualiza variáveis globais
     st.session_state['altura_z'] = dim_h + (dim_h1 / 2.0) 
     st.session_state['maior_dimensao'] = max(dim_a, dim_b)
 
@@ -110,7 +174,7 @@ with abas[5]:
     st.header("Velocidade Característica e Pressão Dinâmica")
     
     vk = v0 * s1 * s2 * s3
-    q = 0.613 * math.pow(vk, 2) # N/m²
+    q = 0.613 * math.pow(vk, 2) 
     
     col_res1, col_res2 = st.columns(2)
     col_res1.metric(label="Velocidade Característica (Vk)", value=f"{vk:.2f} m/s")
@@ -118,24 +182,27 @@ with abas[5]:
     
     st.divider()
     
-    st.subheader("Coeficientes de Pressão Externa (Paredes)")
+    st.subheader("Coeficientes de Pressão Externa ($C_{pe}$) - Paredes")
     
     rel_h_b = dim_h / dim_b
     rel_a_b = dim_a / dim_b
     
-    st.write(f"**Geometria Base:**")
-    st.write(f"- Cobertura: **{st.session_state['tipo_telhado']}**")
-    st.write(f"- Relação h/b: **{rel_h_b:.2f}**")
-    st.write(f"- Relação a/b: **{rel_a_b:.2f}**")
+    st.write(f"- Relação $h/b$: **{rel_h_b:.2f}** | Relação $a/b$: **{rel_a_b:.2f}**")
     
-    st.info("Abaixo, iremos implementar a lógica das tabelas da NBR 6123 com base nestas relações.")
+    cpe_paredes = obter_cpe_paredes(rel_h_b, rel_a_b)
     
-    col_coef1, col_coef2 = st.columns(2)
-    with col_coef1:
-        cpe = st.number_input("Cpe - Exemplo", value=-0.80, step=0.1)
-    with col_coef2:
-        cpi = st.number_input("Cpi - Exemplo", value=0.20, step=0.1)
+    col_v0, col_v90 = st.columns(2)
+    
+    with col_v0:
+        st.write("**Vento a 0° (Perpendicular à face a)**")
+        st.write(f"Face **C** (Barlavento): **{cpe_paredes['vento_0']['Barlavento_C']}**")
+        st.write(f"Face **D** (Sotavento): **{cpe_paredes['vento_0']['Sotavento_D']}**")
+        st.write("Zonas Laterais (**A** e **B**):")
+        st.info(f"A1/B1 = **{cpe_paredes['vento_0']['Lateral_A1_B1']}** \n\n A2/B2 = **{cpe_paredes['vento_0']['Lateral_A2_B2']}** \n\n A3/B3 = **{cpe_paredes['vento_0']['Lateral_A3_B3']}**")
         
-    pressao_resultante = q * (cpe - cpi)
-    
-    st.success(f"Pressão Resultante na Face: **{pressao_resultante:.2f} N/m²**")
+    with col_v90:
+        st.write("**Vento a 90° (Perpendicular à face b)**")
+        st.write(f"Face **A** (Barlavento): **{cpe_paredes['vento_90']['Barlavento_A']}**")
+        st.write(f"Face **B** (Sotavento): **{cpe_paredes['vento_90']['Sotavento_B']}**")
+        st.write("Zonas Laterais (**C** e **D**):")
+        st.info(f"C1/D1 = **{cpe_paredes['vento_90']['Lateral_C1_D1']}** \n\n C2/D2 = **{cpe_paredes['vento_90']['Lateral_C2_D2']}**")

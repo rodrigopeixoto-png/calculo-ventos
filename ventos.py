@@ -1,61 +1,43 @@
 """
 Programa para Cálculo da Força de Ventos em Edificações 
 Baseado na norma brasileira NBR 6123.
-Desenvolvido em Python utilizando Streamlit para a interface web 
-e Matplotlib para a geração dos diagramas de esforços.
+Desenvolvido em Python utilizando Streamlit, Matplotlib e FPDF.
 """
 
 import streamlit as st
 import math
 import matplotlib.pyplot as plt
+from fpdf import FPDF
+import tempfile
+import os
 
 # ==========================================
 # 1. FUNÇÕES MATEMÁTICAS E DE INTERPOLAÇÃO
 # ==========================================
 
 def interp_linear(x, x1, x2, y1, y2):
-    """
-    Realiza a interpolação linear simples entre dois pontos conhecidos.
-    Utilizada quando as dimensões geométricas (h/b, a/b) ou ângulos 
-    caem entre os valores tabelados na norma.
-    """
     if x == x1: return y1
     if x == x2: return y2
     return y1 + ((x - x1) * (y2 - y1) / (x2 - x1))
 
 def interpolar_telhado(beta, dict_valores):
-    """
-    Busca o valor exato na tabela do telhado ou interpola linearmente.
-    Trata casos complexos da NBR 6123 onde um mesmo ângulo possui 
-    duas situações de cálculo (tuplas), calculando a interpolação para ambas.
-    """
     angulos = sorted(list(dict_valores.keys()))
+    if beta in angulos: return dict_valores[beta]
     
-    # Se o ângulo digitado for exato ao da tabela, retorna direto
-    if beta in angulos: 
-        return dict_valores[beta]
-    
-    # Se estiver entre dois ângulos da tabela, interpola
     for i in range(len(angulos)-1):
         if angulos[i] < beta < angulos[i+1]:
             a1, a2 = angulos[i], angulos[i+1]
             val1, val2 = dict_valores[a1], dict_valores[a2]
             
-            # Caso a norma preveja duas situações (sucção e pressão) para o ângulo
             if isinstance(val1, tuple) and isinstance(val2, tuple):
                 v_min = interp_linear(beta, a1, a2, val1[0], val2[0])
                 v_max = interp_linear(beta, a1, a2, val1[1], val2[1])
                 return (round(v_min, 2), round(v_max, 2))
-            
-            # Se a transição muda de tipo abruptamente (ex: de tupla para float)
             elif isinstance(val1, tuple) or isinstance(val2, tuple):
                 return val1 
-            
-            # Interpolação normal para valores únicos
             else:
                 return round(interp_linear(beta, a1, a2, val1, val2), 2)
                 
-    # Extrapolação caso o ângulo seja menor que o mínimo ou maior que o máximo tabelado
     if beta <= angulos[0]: return dict_valores[angulos[0]]
     if beta >= angulos[-1]: return dict_valores[angulos[-1]]
 
@@ -64,24 +46,16 @@ def interpolar_telhado(beta, dict_valores):
 # ==========================================
 
 def obter_cpe_paredes(h_b, a_b):
-    """
-    Calcula os Coeficientes de Pressão Externa (Cpe) para as paredes 
-    de acordo com a Tabela 4 da NBR 6123.
-    Retorna um dicionário dividido por 'Vento a 0°' e 'Vento a 90°'.
-    """
-    # Avaliação da relação h/b para as faces perpendiculares ao vento (Barlavento/Sotavento)
     if h_b <= 0.5:
         c_0 = 0.7; c_90 = 0.7; d_0 = -0.3; b_90 = -0.5 if a_b <= 1 else -0.3 
     elif h_b >= 1.5:
         c_0 = 0.8; c_90 = 0.8; d_0 = -0.6; b_90 = -0.6
     else:
-        # Se 0.5 < h/b < 1.5, exige interpolação linear
         c_0 = interp_linear(h_b, 0.5, 1.5, 0.7, 0.8); c_90 = c_0
         d_0 = interp_linear(h_b, 0.5, 1.5, -0.3, -0.6)
         b_ref = -0.5 if a_b <= 1 else -0.3
         b_90 = interp_linear(h_b, 0.5, 1.5, b_ref, -0.6)
         
-    # Zonas laterais (A1, B1, etc.) sofrem sucção dependendo da relação a/b
     if a_b <= 1:
         a1_b1 = -0.8; a2_b2 = -0.4; a3_b3 = -0.3 
     elif a_b <= 2:
@@ -97,23 +71,17 @@ def obter_cpe_paredes(h_b, a_b):
     }
 
 def obter_cpe_telhado_duas_aguas(h_b, beta):
-    """
-    Calcula os Coeficientes de Pressão Externa para telhados de DUAS ÁGUAS
-    conforme a Tabela 5 da NBR 6123.
-    """
-    # Zonas E, G, F, H, I, J para vento a 0°
     v0_eg = {5: -0.8, 10: -0.8, 15: -0.8, 20: -0.9, 30: -1.0, 45: -1.2, 60: -1.2}
     v0_fh = {5: -0.6, 10: -0.6, 15: -0.6, 20: -0.7, 30: -0.8, 45: -0.9, 60: -1.0}
     v0_ij = {5: -0.2, 10: -0.2, 15: -0.2, 20: -0.3, 30: -0.4, 45: -0.4, 60: -0.4}
     
-    # Vento a 90° depende da relação h/b
     if h_b <= 0.5:
         v90_ef = {5: -0.9, 10: (-1.1, -0.3), 15: (-1.0, 0.2), 20: (-0.7, 0.3), 30: (-0.3, 0.5), 45: 0.6, 60: 0.7}
         v90_gh = {5: -0.4, 10: -0.4, 15: -0.4, 20: -0.4, 30: -0.4, 45: -0.5, 60: -0.6}
     elif h_b >= 1.5:
         v90_ef = {5: -1.3, 10: -1.3, 15: (-1.3, -0.2), 20: (-1.1, 0.0), 30: (-0.7, 0.3), 45: 0.6, 60: 0.7}
         v90_gh = {5: -0.6, 10: -0.6, 15: -0.6, 20: -0.6, 30: -0.6, 45: -0.6, 60: -0.6}
-    else: # Simplificação de segurança para h/b entre 0.5 e 1.5
+    else: 
         v90_ef = {5: -0.9, 10: (-1.1, -0.3), 15: (-1.0, 0.2), 20: (-0.7, 0.3), 30: (-0.3, 0.5), 45: 0.6, 60: 0.7}
         v90_gh = {5: -0.4, 10: -0.4, 15: -0.4, 20: -0.4, 30: -0.4, 45: -0.5, 60: -0.6}
         
@@ -123,10 +91,6 @@ def obter_cpe_telhado_duas_aguas(h_b, beta):
     }
 
 def obter_cpe_telhado_uma_agua(h_b, beta):
-    """
-    Calcula os Coeficientes de Pressão Externa para telhados de UMA ÁGUA
-    conforme a Tabela 8 da NBR 6123.
-    """
     v0_h = {5: -1.0, 10: -1.0, 15: -0.9, 20: -0.8, 30: -0.8}
     v0_i = {5: -0.5, 10: -0.5, 15: -0.5, 20: -0.6, 30: -0.6}
     v0_j = {5: -0.5, 10: -0.5, 15: -0.5, 20: -0.6, 30: -0.6}
@@ -149,12 +113,8 @@ def obter_cpe_telhado_uma_agua(h_b, beta):
     }
 
 def calc_res_val(cpe, cpi, q):
-    """
-    Calcula a pressão estática final: Delta_p = q * (Cpe - Cpi).
-    Retorna formato numérico (float) para os gráficos.
-    """
     if isinstance(cpe, tuple):
-        return q * (cpe[0] - cpi) # Adota a primeira situação (geralmente mais crítica para sucção)
+        return q * (cpe[0] - cpi) 
     return q * (cpe - cpi)
 
 # ==========================================
@@ -162,35 +122,23 @@ def calc_res_val(cpe, cpi, q):
 # ==========================================
 
 def desenhar_carga(ax, x1, y1, x2, y2, val, arrow_len, label=""):
-    """
-    Função auxiliar geométrica para desenhar cargas distribuídas 
-    (setas perpendiculares à superfície selecionada).
-    """
     if val == 0: return
-    
-    # Encontra o ponto médio e o comprimento da face
     cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
     dx, dy = x2 - x1, y2 - y1
     length = math.hypot(dx, dy)
-    
-    # Calcula o Vetor Normal Unitário (apontando para fora num traçado horário)
     nx, ny = -dy / length, dx / length
-    cor = "#ef4444" if val < 0 else "#3b82f6" # Vermelho (Sucção), Azul (Pressão)
+    cor = "#ef4444" if val < 0 else "#3b82f6" 
     
-    # Desenha 3 setas distribuídas pela face
     for i in [0.2, 0.5, 0.8]:
         px, py = x1 + dx * i, y1 + dy * i
-        
-        if val < 0: # Sucção (Seta empurra para fora)
+        if val < 0: 
             start = (px, py)
             end = (px + nx * arrow_len, py + ny * arrow_len)
-        else: # Pressão (Seta entra na face)
+        else: 
             start = (px + nx * arrow_len, py + ny * arrow_len)
             end = (px, py)
-            
         ax.annotate("", xy=end, xytext=start, arrowprops=dict(arrowstyle="->", color=cor, lw=1.5))
         
-    # Adiciona a caixa de texto com o valor no centro da distribuição de setas
     ax.text(cx + nx * arrow_len * 1.5, cy + ny * arrow_len * 1.5, f"{val:.1f}",
             ha='center', va='center', fontsize=9, color=cor, weight="bold", 
             bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
@@ -200,13 +148,9 @@ def desenhar_carga(ax, x1, y1, x2, y2, val, arrow_len, label=""):
                 ha='center', va='center', fontsize=8, color="black")
 
 def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, titulo, is_vento_90=True, tipo_telhado="Duas águas"):
-    """
-    Renderiza o corte transversal da edificação com os esforços aplicados.
-    """
     fig, ax = plt.subplots(figsize=(6, 4))
-    arrow_len = max(dim_b, dim_h + dim_h1) * 0.15 # Tamanho dinâmico das setas
+    arrow_len = max(dim_b, dim_h + dim_h1) * 0.15 
 
-    # Desenho da edificação (Duas Águas ou Uma Água)
     if tipo_telhado == "Duas águas":
         x = [0, 0, dim_b/2, dim_b, dim_b]
         y = [0, dim_h, dim_h + dim_h1, dim_h, 0]
@@ -214,7 +158,6 @@ def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, t
         ax.fill_between([0, dim_b], [0, 0], [dim_h, dim_h], color='#f1f5f9')
         ax.fill_between([0, dim_b/2, dim_b], [dim_h, dim_h+dim_h1, dim_h], [dim_h, dim_h, dim_h], color='#e2e8f0')
 
-        # Chamadas para desenhar cargas nas 4 faces visíveis
         l_esq = "Face A" if is_vento_90 else "Face C"
         desenhar_carga(ax, 0, 0, 0, dim_h, p_esq, arrow_len, l_esq)
         l_tesq = "Zonas E/F" if is_vento_90 else "Zonas E/G"
@@ -237,14 +180,11 @@ def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, t
         l_dir = "Face B" if is_vento_90 else "Face D"
         desenhar_carga(ax, dim_b, dim_h + dim_h1, dim_b, 0, p_dir, arrow_len, l_dir)
 
-    # Identificadores Visuais da direção do Vento (Dimensões Refinadas)
     if is_vento_90:
-        # Seta do vento 90 graus: Mais delicada e levemente mais afastada
         ax.annotate("Vento", xy=(-arrow_len * 2.2, dim_h/2), xytext=(-arrow_len * 3.6, dim_h/2),
                     arrowprops=dict(facecolor='black', shrink=0.05, width=1.0, headwidth=5),
                     va='center', ha='right', weight='bold', fontsize=9)
     else:
-        # Caixa do vento 0 graus: Reduzida em padding e fonte
         ax.text(dim_b/2, dim_h/2, "Vento Entrando\n(0°)",
                 bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.8, lw=0.8),
                 color="black", weight="bold", ha='center', va='center', fontsize=7.5)
@@ -252,18 +192,82 @@ def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, t
     ax.set_aspect('equal')
     ax.axis('off')
     ax.set_title(titulo, pad=20, fontweight='bold', fontsize=14)
-    ax.set_xlim(-dim_b*0.8, dim_b*1.8) # Margens extras laterais
-    ax.set_ylim(0, dim_h + dim_h1 + dim_b*0.4) # Margem extra superior
+    ax.set_xlim(-dim_b*0.8, dim_b*1.8) 
+    ax.set_ylim(0, dim_h + dim_h1 + dim_b*0.4) 
     
     return fig
 
 # ==========================================
-# 4. INTERFACE GRÁFICA (Streamlit)
+# 4. GERADOR DE RELATÓRIO PDF (FPDF)
+# ==========================================
+
+def normalizar_texto(texto):
+    """Substitui caracteres especiais para evitar erros de encoding no PDF padrão."""
+    substituicoes = {
+        'á': 'a', 'ã': 'a', 'â': 'a', 'é': 'e', 'ê': 'e', 'í': 'i', 
+        'ó': 'o', 'ô': 'o', 'õ': 'o', 'ú': 'u', 'ç': 'c',
+        'Á': 'A', 'Ã': 'A', 'Â': 'A', 'É': 'E', 'Ê': 'E', 'Í': 'I', 
+        'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ú': 'U', 'Ç': 'C', '°': ' graus', '²': '2'
+    }
+    for orig, sub in substituicoes.items():
+        texto = texto.replace(orig, sub)
+    return texto
+
+def gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3, vk, q, tipo_telhado, cpi_positivo, cpi_negativo):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, normalizar_texto("Relatorio de Calculo de Ventos - NBR 6123"), ln=True, align='C')
+    pdf.line(10, 20, 200, 20)
+    pdf.ln(10)
+    
+    # Seção 1: Entradas
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, normalizar_texto("1. Parametros Geometricos"), ln=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(0, 6, normalizar_texto(f"Tipo de Cobertura: {tipo_telhado}"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Dimensoes: a = {dim_a}m, b = {dim_b}m"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Alturas: pilar (h) = {dim_h}m, cumeeira/desnivel (h1) = {dim_h1}m"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Angulo do telhado: {angulo_beta} graus"), ln=True)
+    pdf.ln(5)
+    
+    # Seção 2: Fatores
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, normalizar_texto("2. Fatores do Vento"), ln=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(0, 6, normalizar_texto(f"Velocidade Basica (V0): {v0} m/s"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Fator Topografico (S1): {s1:.2f}"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Fator de Rugosidade (S2): {s2:.2f}"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Fator Estatistico (S3): {s3:.2f}"), ln=True)
+    pdf.ln(5)
+    
+    # Seção 3: Esforços
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, normalizar_texto("3. Resultados Base"), ln=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(0, 6, normalizar_texto(f"Velocidade Caracteristica (Vk): {vk:.2f} m/s"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Pressao Dinamica (q): {q:.2f} N/m2"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Coeficientes de Pressao Interna (Cpi): {cpi_positivo} e {cpi_negativo}"), ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", 'I', 10)
+    pdf.multi_cell(0, 6, normalizar_texto("Nota: Os diagramas e coeficientes completos podem ser visualizados e verificados diretamente na interface web da aplicacao para as duas combinacoes de Cpi."))
+    
+    # Exportação para Bytes
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        with open(tmp.name, "rb") as f:
+            pdf_bytes = f.read()
+    os.remove(tmp.name)
+    return pdf_bytes
+
+# ==========================================
+# 5. INTERFACE STREAMLIT
 # ==========================================
 
 st.set_page_config(page_title="Ventos NBR 6123", layout="wide")
 
-# --- BARRA LATERAL (ENTRADAS DE DADOS) ---
 with st.sidebar:
     st.header("Parâmetros de Entrada")
     
@@ -297,23 +301,19 @@ with st.sidebar:
     cpi_negativo = st.number_input("Cpi (Condição Negativa)", value=-0.3)
 
 # --- PROCESSAMENTO DOS DADOS ---
-# Fator S2 é ajustado dependendo da altura da edificação
 altura_z = dim_h + (dim_h1 / 2.0)
-z_calc = max(altura_z, 5.0) # A norma limita altura mínima de cálculo em z=5m
+z_calc = max(altura_z, 5.0) 
 b_val, p_val = s2_params[idx_cat]
 s2 = b_val * 1.0 * math.pow((z_calc / 10.0), p_val)
 s3 = s3_valores[idx_s3]
 
-# Cálculo da Pressão Dinâmica q = 0.613 * Vk²
 vk = v0 * s1 * s2 * s3
 q = 0.613 * math.pow(vk, 2)
 
-# Determinação das proporções exigidas nas tabelas
 rel_h_b = dim_h / dim_b
 rel_a_b = dim_a / dim_b
-
-# Chamada das funções que recuperam Cpe
 cpe_paredes = obter_cpe_paredes(rel_h_b, rel_a_b)
+
 if tipo_telhado == "Duas águas":
     cpe_telhado = obter_cpe_telhado_duas_aguas(rel_h_b, angulo_beta)
 else:
@@ -377,23 +377,20 @@ st.divider()
 st.header("3. Esforços Resultantes Finais (Δp)")
 st.markdown("As setas representam o sentido real da força. **Vermelho indica Sucção** (empurrando para fora) e **Azul indica Pressão** (empurrando para dentro). Valores em **N/m²**.")
 
-# Exibição dividida em abas para cada situação de Pressão Interna (Cpi)
 abas_result = st.tabs([f"Combinação 1 (Cpi = {cpi_positivo})", f"Combinação 2 (Cpi = {cpi_negativo})"])
 
-# Plotagem Combinação 1 (Cpi Positivo)
+# Plotagem Combinação 1
 with abas_result[0]:
     col_graf_0, col_graf_90 = st.columns(2)
     
     with col_graf_0:
         v0_pesq = calc_res_val(cpe_paredes['0']['C'], cpi_positivo, q)
         v0_pdir = calc_res_val(cpe_paredes['0']['D'], cpi_positivo, q)
-        
         if tipo_telhado == "Duas águas":
             v0_tesq = calc_res_val(cpe_telhado['0']['EG'], cpi_positivo, q)
             v0_tdir = calc_res_val(cpe_telhado['0']['FH'], cpi_positivo, q)
         else:
-            v0_tesq = calc_res_val(cpe_telhado['0']['H'], cpi_positivo, q) 
-            v0_tdir = 0 
+            v0_tesq = calc_res_val(cpe_telhado['0']['H'], cpi_positivo, q); v0_tdir = 0 
             
         fig_0 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq, v0_pdir, v0_tesq, v0_tdir, "Vento a 0°", is_vento_90=False, tipo_telhado=tipo_telhado)
         st.pyplot(fig_0)
@@ -401,31 +398,27 @@ with abas_result[0]:
     with col_graf_90:
         v90_pesq = calc_res_val(cpe_paredes['90']['A'], cpi_positivo, q)
         v90_pdir = calc_res_val(cpe_paredes['90']['B'], cpi_positivo, q)
-        
         if tipo_telhado == "Duas águas":
             v90_tesq = calc_res_val(cpe_telhado['90']['EF'], cpi_positivo, q)
             v90_tdir = calc_res_val(cpe_telhado['90']['GH'], cpi_positivo, q)
         else:
-            v90_tesq = calc_res_val(cpe_telhado['90']['H'], cpi_positivo, q)
-            v90_tdir = 0
+            v90_tesq = calc_res_val(cpe_telhado['90']['H'], cpi_positivo, q); v90_tdir = 0
             
         fig_90 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq, v90_pdir, v90_tesq, v90_tdir, "Vento a 90°", is_vento_90=True, tipo_telhado=tipo_telhado)
         st.pyplot(fig_90)
 
-# Plotagem Combinação 2 (Cpi Negativo)
+# Plotagem Combinação 2
 with abas_result[1]:
     col_graf_0_c2, col_graf_90_c2 = st.columns(2)
     
     with col_graf_0_c2:
         v0_pesq_c2 = calc_res_val(cpe_paredes['0']['C'], cpi_negativo, q)
         v0_pdir_c2 = calc_res_val(cpe_paredes['0']['D'], cpi_negativo, q)
-        
         if tipo_telhado == "Duas águas":
             v0_tesq_c2 = calc_res_val(cpe_telhado['0']['EG'], cpi_negativo, q)
             v0_tdir_c2 = calc_res_val(cpe_telhado['0']['FH'], cpi_negativo, q)
         else:
-            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['H'], cpi_negativo, q) 
-            v0_tdir_c2 = 0
+            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['H'], cpi_negativo, q); v0_tdir_c2 = 0
             
         fig_0_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq_c2, v0_pdir_c2, v0_tesq_c2, v0_tdir_c2, "Vento a 0°", is_vento_90=False, tipo_telhado=tipo_telhado)
         st.pyplot(fig_0_c2)
@@ -433,13 +426,22 @@ with abas_result[1]:
     with col_graf_90_c2:
         v90_pesq_c2 = calc_res_val(cpe_paredes['90']['A'], cpi_negativo, q)
         v90_pdir_c2 = calc_res_val(cpe_paredes['90']['B'], cpi_negativo, q)
-        
         if tipo_telhado == "Duas águas":
             v90_tesq_c2 = calc_res_val(cpe_telhado['90']['EF'], cpi_negativo, q)
             v90_tdir_c2 = calc_res_val(cpe_telhado['90']['GH'], cpi_negativo, q)
         else:
-            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['H'], cpi_negativo, q) 
-            v90_tdir_c2 = 0
+            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['H'], cpi_negativo, q); v90_tdir_c2 = 0
             
         fig_90_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq_c2, v90_pdir_c2, v90_tesq_c2, v90_tdir_c2, "Vento a 90°", is_vento_90=True, tipo_telhado=tipo_telhado)
         st.pyplot(fig_90_c2)
+
+st.divider()
+
+# Botão de Exportação para PDF
+pdf_gerado = gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3, vk, q, tipo_telhado, cpi_positivo, cpi_negativo)
+st.download_button(
+    label="📄 Baixar Relatório de Cálculo (PDF)",
+    data=pdf_gerado,
+    file_name="memoria_de_calculo_ventos.pdf",
+    mime="application/pdf"
+)

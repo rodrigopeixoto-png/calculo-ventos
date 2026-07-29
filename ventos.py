@@ -1,5 +1,7 @@
 import streamlit as st
 import math
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 # ==========================================
 # FUNÇÕES DE CÁLCULO E INTERPOLAÇÃO
@@ -76,7 +78,6 @@ def obter_cpe_telhado_duas_aguas(h_b, beta):
     }
 
 def calcular_resultante(cpe, cpi, q):
-    """Calcula a resultante. Se Cpe for tupla (dois valores), retorna os dois cálculos."""
     if isinstance(cpe, tuple):
         r1 = q * (cpe[0] - cpi)
         r2 = q * (cpe[1] - cpi)
@@ -85,11 +86,48 @@ def calcular_resultante(cpe, cpi, q):
         return f"**{(q * (cpe - cpi)):.2f}**"
 
 # ==========================================
-# INTERFACE STREAMLIT (LAYOUT ATUALIZADO)
+# GERADOR DE GRÁFICOS (MATPLOTLIB)
+# ==========================================
+def plot_esquema_vento(dim_a, dim_b):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    
+    # Desenho Vento a 0°
+    ax1.add_patch(patches.Rectangle((0, 0), dim_a, dim_b, fill=True, color='#e2e8f0', ec='black'))
+    ax1.set_xlim(-dim_a*0.3, dim_a*1.3)
+    ax1.set_ylim(-dim_b*0.5, dim_b*1.5)
+    
+    ax1.text(dim_a/2, -dim_b*0.1, 'Face C', va='top', ha='center', color='#1d4ed8', fontweight='bold', fontsize=10)
+    ax1.text(dim_a/2, dim_b*1.1, 'Face D', va='bottom', ha='center', color='#b91c1c', fontweight='bold', fontsize=10)
+    ax1.text(-dim_a*0.05, dim_b/2, 'Face A', va='center', ha='right', fontsize=9)
+    ax1.text(dim_a*1.05, dim_b/2, 'Face B', va='center', ha='left', fontsize=9)
+    
+    # Seta do vento 0° (Vem de baixo para cima)
+    ax1.arrow(dim_a/2, -dim_b*0.4, 0, dim_b*0.2, head_width=dim_a*0.05, head_length=dim_b*0.08, fc='#1d4ed8', ec='#1d4ed8')
+    ax1.set_title("Vento a 0°", fontweight='bold')
+    ax1.axis('off')
+    
+    # Desenho Vento a 90°
+    ax2.add_patch(patches.Rectangle((0, 0), dim_a, dim_b, fill=True, color='#e2e8f0', ec='black'))
+    ax2.set_xlim(-dim_a*0.3, dim_a*1.3)
+    ax2.set_ylim(-dim_b*0.5, dim_b*1.5)
+    
+    ax2.text(dim_a/2, -dim_b*0.1, 'Face C', va='top', ha='center', fontsize=9)
+    ax2.text(dim_a/2, dim_b*1.1, 'Face D', va='bottom', ha='center', fontsize=9)
+    ax2.text(-dim_a*0.05, dim_b/2, 'Face A', va='center', ha='right', color='#1d4ed8', fontweight='bold', fontsize=10)
+    ax2.text(dim_a*1.05, dim_b/2, 'Face B', va='center', ha='left', color='#b91c1c', fontweight='bold', fontsize=10)
+    
+    # Seta do vento 90° (Vem da esquerda para a direita)
+    ax2.arrow(-dim_a*0.25, dim_b/2, dim_a*0.15, 0, head_width=dim_b*0.08, head_length=dim_a*0.05, fc='#1d4ed8', ec='#1d4ed8')
+    ax2.set_title("Vento a 90°", fontweight='bold')
+    ax2.axis('off')
+    
+    return fig
+
+# ==========================================
+# INTERFACE STREAMLIT
 # ==========================================
 st.set_page_config(page_title="Ventos NBR 6123", layout="wide")
 
-# --- BARRA LATERAL (INPUTS) ---
 with st.sidebar:
     st.header("Parâmetros de Entrada")
     
@@ -114,7 +152,7 @@ with st.sidebar:
     idx_s3 = st.selectbox("Grupo S3", range(len(s3_labels)), format_func=lambda x: s3_labels[x], index=2)
 
     st.subheader("3. Pressão Interna (Cpi)")
-    st.markdown("Insira os limites de $C_{pi}$ para cálculo das combinações mais desfavoráveis:")
+    st.markdown("Insira os limites de $C_{pi}$ para cálculo das combinações:")
     cpi_positivo = st.number_input("Cpi (Condição Positiva)", value=0.2)
     cpi_negativo = st.number_input("Cpi (Condição Negativa)", value=-0.3)
 
@@ -133,11 +171,15 @@ rel_a_b = dim_a / dim_b
 cpe_paredes = obter_cpe_paredes(rel_h_b, rel_a_b)
 cpe_telhado = obter_cpe_telhado_duas_aguas(rel_h_b, angulo_beta)
 
-# --- TELA PRINCIPAL (OUTPUTS) ---
+# --- TELA PRINCIPAL ---
 st.title("Forças de Vento - NBR 6123")
 st.markdown("Cálculo estruturado das forças estáticas devidas ao vento em edificações retangulares.")
 
-st.header("1. Pressão Dinâmica")
+st.header("1. Esquema da Edificação e Pressão Dinâmica")
+# Exibe o gráfico gerado com Matplotlib
+fig_esquema = plot_esquema_vento(dim_a, dim_b)
+st.pyplot(fig_esquema)
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Velocidade Característica (Vk)", f"{vk:.2f} m/s")
 col2.metric("Pressão Dinâmica (q)", f"{q:.2f} N/m²")
@@ -163,8 +205,6 @@ with col_t:
         st.write("**Vento a 90°**")
         st.write(f"- Barlavento (E/F): {cpe_telhado['90']['EF']}")
         st.write(f"- Sotavento (G/H): {cpe_telhado['90']['GH']}")
-    else:
-        st.info("Valores para telhado de uma água requerem implementação da respectiva tabela.")
 
 st.divider()
 
@@ -173,7 +213,6 @@ st.markdown("A equação aplicada para o cálculo das faces é $\Delta p = q \ti
 
 abas_result = st.tabs([f"Combinação 1 (Cpi = {cpi_positivo})", f"Combinação 2 (Cpi = {cpi_negativo})"])
 
-# Combinação 1: Cpi Positivo
 with abas_result[0]:
     col_r1, col_r2 = st.columns(2)
     with col_r1:
@@ -187,7 +226,6 @@ with abas_result[0]:
         st.write(f"- **Parede B (Sotavento):** {calcular_resultante(cpe_paredes['90']['B'], cpi_positivo, q)}")
         st.write(f"- **Telhado (Zonas E/F):** {calcular_resultante(cpe_telhado['90']['EF'], cpi_positivo, q)}")
 
-# Combinação 2: Cpi Negativo
 with abas_result[1]:
     col_r3, col_r4 = st.columns(2)
     with col_r3:

@@ -237,15 +237,17 @@ def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, t
         l_dir = "Face B" if is_vento_90 else "Face D"
         desenhar_carga(ax, dim_b, dim_h + dim_h1, dim_b, 0, p_dir, arrow_len, l_dir)
 
-    # Identificadores Visuais da direção do Vento (Ajustados para não conflitar com os valores)
+    # Identificadores Visuais da direção do Vento (Dimensões Refinadas)
     if is_vento_90:
-        ax.annotate("Vento", xy=(-arrow_len * 2.0, dim_h/2), xytext=(-arrow_len * 4.0, dim_h/2),
-                    arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=6),
-                    va='center', ha='right', weight='bold', fontsize=10)
+        # Seta do vento 90 graus: Mais delicada e levemente mais afastada
+        ax.annotate("Vento", xy=(-arrow_len * 2.2, dim_h/2), xytext=(-arrow_len * 3.6, dim_h/2),
+                    arrowprops=dict(facecolor='black', shrink=0.05, width=1.0, headwidth=5),
+                    va='center', ha='right', weight='bold', fontsize=9)
     else:
+        # Caixa do vento 0 graus: Reduzida em padding e fonte
         ax.text(dim_b/2, dim_h/2, "Vento Entrando\n(0°)",
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", alpha=0.8),
-                color="black", weight="bold", ha='center', va='center', fontsize=9)
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.8, lw=0.8),
+                color="black", weight="bold", ha='center', va='center', fontsize=7.5)
 
     ax.set_aspect('equal')
     ax.axis('off')

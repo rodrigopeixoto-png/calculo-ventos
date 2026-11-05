@@ -42,8 +42,46 @@ def interpolar_telhado(beta, dict_valores):
     if beta >= angulos[-1]: return dict_valores[angulos[-1]]
 
 # ==========================================
-# 2. FUNÇÕES DA NBR 6123 (Cálculo de Cpe)
+# 2. FUNÇÕES DA NBR 6123 (Cálculo de Cpe e Cpi)
 # ==========================================
+
+def calcular_cpi_automatico(area_barlavento, area_sotavento, area_lateral1, area_lateral2):
+    """
+    Calcula os valores de Cpi baseados nas regras de permeabilidade da NBR 6123 (Item 6.2).
+    Retorna uma tupla com a condição positiva (ou nula) e a negativa.
+    """
+    area_total = area_barlavento + area_sotavento + area_lateral1 + area_lateral2
+    
+    if area_total == 0:
+        return 0.0, -0.2
+        
+    area_outras = area_total - area_barlavento
+    
+    # 1. Abertura Dominante a Barlavento
+    if area_barlavento >= 2 * area_outras:
+        cpi = 0.7 if area_outras > 0 else 0.8
+        return cpi, cpi
+        
+    # 2. Abertura Dominante a Sotavento/Laterais
+    maior_succao = max(area_sotavento, area_lateral1, area_lateral2)
+    area_restante = area_total - maior_succao
+    if maior_succao >= 2 * area_restante:
+        return -0.4, -0.4 
+        
+    # 3. Faces igualmente permeáveis (tolerância de 10%)
+    areas = [area_barlavento, area_sotavento, area_lateral1, area_lateral2]
+    if max(areas) - min(areas) <= 0.1 * area_total:
+        return 0.0, -0.3
+        
+    # 4. Cálculo pelo Índice de Permeabilidade
+    if area_outras > 0:
+        pi = area_barlavento / area_outras
+        if pi <= 0.3: cpi_calc = -0.3
+        elif pi >= 3.0: cpi_calc = 0.7
+        else: cpi_calc = interp_linear(pi, 0.3, 3.0, -0.3, 0.7)
+        return round(cpi_calc, 2), -0.2 
+        
+    return 0.2, -0.3 
 
 def obter_cpe_paredes(h_b, a_b):
     if h_b <= 0.5:
@@ -81,7 +119,7 @@ def obter_cpe_telhado_duas_aguas(h_b, beta):
     elif h_b >= 1.5:
         v90_ef = {5: -1.3, 10: -1.3, 15: (-1.3, -0.2), 20: (-1.1, 0.0), 30: (-0.7, 0.3), 45: 0.6, 60: 0.7}
         v90_gh = {5: -0.6, 10: -0.6, 15: -0.6, 20: -0.6, 30: -0.6, 45: -0.6, 60: -0.6}
-    else: 
+    else:
         v90_ef = {5: -0.9, 10: (-1.1, -0.3), 15: (-1.0, 0.2), 20: (-0.7, 0.3), 30: (-0.3, 0.5), 45: 0.6, 60: 0.7}
         v90_gh = {5: -0.4, 10: -0.4, 15: -0.4, 20: -0.4, 30: -0.4, 45: -0.5, 60: -0.6}
         
@@ -102,19 +140,12 @@ def obter_cpe_telhado_uma_agua(h_b, beta):
     v90_l = {5: -0.4, 10: -0.4, 15: -0.4, 20: -0.4, 30: -0.4}
     
     return {
-        '0': {
-            'H': interpolar_telhado(beta, v0_h), 'I': interpolar_telhado(beta, v0_i),
-            'J': interpolar_telhado(beta, v0_j), 'L': interpolar_telhado(beta, v0_l)
-        },
-        '90': {
-            'H': interpolar_telhado(beta, v90_h), 'I': interpolar_telhado(beta, v90_i),
-            'J': interpolar_telhado(beta, v90_j), 'L': interpolar_telhado(beta, v90_l)
-        }
+        '0': {'H': interpolar_telhado(beta, v0_h), 'I': interpolar_telhado(beta, v0_i), 'J': interpolar_telhado(beta, v0_j), 'L': interpolar_telhado(beta, v0_l)},
+        '90': {'H': interpolar_telhado(beta, v90_h), 'I': interpolar_telhado(beta, v90_i), 'J': interpolar_telhado(beta, v90_j), 'L': interpolar_telhado(beta, v90_l)}
     }
 
 def calc_res_val(cpe, cpi, q):
-    if isinstance(cpe, tuple):
-        return q * (cpe[0] - cpi) 
+    if isinstance(cpe, tuple): return q * (cpe[0] - cpi) 
     return q * (cpe - cpi)
 
 # ==========================================
@@ -202,7 +233,6 @@ def plot_diagrama_esforcos(dim_b, dim_h, dim_h1, p_esq, p_dir, p_tesq, p_tdir, t
 # ==========================================
 
 def normalizar_texto(texto):
-    """Substitui caracteres especiais para evitar erros de encoding no PDF padrão."""
     substituicoes = {
         'á': 'a', 'ã': 'a', 'â': 'a', 'é': 'e', 'ê': 'e', 'í': 'i', 
         'ó': 'o', 'ô': 'o', 'õ': 'o', 'ú': 'u', 'ç': 'c',
@@ -213,7 +243,7 @@ def normalizar_texto(texto):
         texto = texto.replace(orig, sub)
     return texto
 
-def gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3, vk, q, tipo_telhado, cpi_positivo, cpi_negativo):
+def gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3, vk, q, tipo_telhado, cpi_0_pos, cpi_0_neg, cpi_90_pos, cpi_90_neg):
     pdf = FPDF()
     pdf.add_page()
     
@@ -222,7 +252,6 @@ def gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3
     pdf.line(10, 20, 200, 20)
     pdf.ln(10)
     
-    # Seção 1: Entradas
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, normalizar_texto("1. Parametros Geometricos"), ln=True)
     pdf.set_font("Arial", '', 11)
@@ -232,7 +261,6 @@ def gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3
     pdf.cell(0, 6, normalizar_texto(f"Angulo do telhado: {angulo_beta} graus"), ln=True)
     pdf.ln(5)
     
-    # Seção 2: Fatores
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, normalizar_texto("2. Fatores do Vento"), ln=True)
     pdf.set_font("Arial", '', 11)
@@ -242,19 +270,18 @@ def gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3
     pdf.cell(0, 6, normalizar_texto(f"Fator Estatistico (S3): {s3:.2f}"), ln=True)
     pdf.ln(5)
     
-    # Seção 3: Esforços
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, normalizar_texto("3. Resultados Base"), ln=True)
     pdf.set_font("Arial", '', 11)
     pdf.cell(0, 6, normalizar_texto(f"Velocidade Caracteristica (Vk): {vk:.2f} m/s"), ln=True)
     pdf.cell(0, 6, normalizar_texto(f"Pressao Dinamica (q): {q:.2f} N/m2"), ln=True)
-    pdf.cell(0, 6, normalizar_texto(f"Coeficientes de Pressao Interna (Cpi): {cpi_positivo} e {cpi_negativo}"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Cpi Adotado (Vento 0 graus): {cpi_0_pos} e {cpi_0_neg}"), ln=True)
+    pdf.cell(0, 6, normalizar_texto(f"Cpi Adotado (Vento 90 graus): {cpi_90_pos} e {cpi_90_neg}"), ln=True)
     pdf.ln(5)
     
     pdf.set_font("Arial", 'I', 10)
     pdf.multi_cell(0, 6, normalizar_texto("Nota: Os diagramas e coeficientes completos podem ser visualizados e verificados diretamente na interface web da aplicacao para as duas combinacoes de Cpi."))
     
-    # Exportação para Bytes
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
         with open(tmp.name, "rb") as f:
@@ -296,9 +323,12 @@ with st.sidebar:
     s3_labels = ["1 - Hospitais/Bombeiros", "2 - Hotéis/Comércio", "3 - Indústria/Depósitos", "4 - Vedações", "5 - Temporárias"]
     idx_s3 = st.selectbox("Grupo S3", range(len(s3_labels)), format_func=lambda x: s3_labels[x], index=2)
 
-    st.subheader("3. Pressão Interna (Cpi)")
-    cpi_positivo = st.number_input("Cpi (Condição Positiva)", value=0.2)
-    cpi_negativo = st.number_input("Cpi (Condição Negativa)", value=-0.3)
+    st.subheader("3. Aberturas p/ Cálculo Cpi")
+    st.markdown("Área total de aberturas (m²) em cada face:")
+    area_a = st.number_input("Face A (Menor, Y-)", value=0.0)
+    area_b = st.number_input("Face B (Menor, Y+)", value=0.0)
+    area_c = st.number_input("Face C (Maior, X-)", value=0.0)
+    area_d = st.number_input("Face D (Maior, X+)", value=0.0)
 
 # --- PROCESSAMENTO DOS DADOS ---
 altura_z = dim_h + (dim_h1 / 2.0)
@@ -318,6 +348,13 @@ if tipo_telhado == "Duas águas":
     cpe_telhado = obter_cpe_telhado_duas_aguas(rel_h_b, angulo_beta)
 else:
     cpe_telhado = obter_cpe_telhado_uma_agua(rel_h_b, angulo_beta)
+
+# Cálculo Cpi Automático
+# Vento 0° (Barlavento = Face C, Sotavento = Face D)
+cpi_0_pos, cpi_0_neg = calcular_cpi_automatico(area_c, area_d, area_a, area_b)
+# Vento 90° (Barlavento = Face A, Sotavento = Face B)
+cpi_90_pos, cpi_90_neg = calcular_cpi_automatico(area_a, area_b, area_c, area_d)
+
 
 # --- TELA PRINCIPAL (EXIBIÇÃO DE RESULTADOS) ---
 st.title("Forças de Vento - NBR 6123")
@@ -374,37 +411,53 @@ with col_t:
 
 st.divider()
 
-st.header("3. Esforços Resultantes Finais (Δp)")
-st.markdown("As setas representam o sentido real da força. **Vermelho indica Sucção** (empurrando para fora) e **Azul indica Pressão** (empurrando para dentro). Valores em **N/m²**.")
+st.header("3. Pressão Interna Automática (Cpi)")
 
-abas_result = st.tabs([f"Combinação 1 (Cpi = {cpi_positivo})", f"Combinação 2 (Cpi = {cpi_negativo})"])
+with st.expander("📖 Guia Orientativo da Norma (Permeabilidade)"):
+    st.markdown("""
+    **Como a NBR 6123 define o Cpi (Item 6.2):**
+    - **Abertura Dominante a Barlavento:** Quando o vento entra livremente por uma face principal e as outras faces são fechadas, o interior do galpão "infla". O Cpi será positivo, variando até +0.8.
+    - **Faces Igualmente Permeáveis:** Prédios com janelas distribuídas igualmente tendem a ter sucção interna constante. A norma indica combinações de -0.3 e 0.0.
+    - **Impermeável:** Edificações totalmente estanques (sem janelas ou com janelas seladas) consideram-se com Cpi variando entre -0.2 e 0.0.
+    """)
+
+col_cpi1, col_cpi2 = st.columns(2)
+col_cpi1.info(f"**Vento a 0° (Barlavento na Face C):**\nCpi adotado = {cpi_0_pos} e {cpi_0_neg}")
+col_cpi2.info(f"**Vento a 90° (Barlavento na Face A):**\nCpi adotado = {cpi_90_pos} e {cpi_90_neg}")
+
+st.divider()
+
+st.header("4. Esforços Resultantes Finais (Δp)")
+st.markdown("A equação aplicada é $\Delta p = q \times (C_{pe} - C_{pi})$. **Vermelho indica Sucção** (para fora) e **Azul indica Pressão** (para dentro). Valores em **N/m²**.")
+
+abas_result = st.tabs(["Combinação 1 (Cpi Positivo/Nulo)", "Combinação 2 (Cpi Negativo)"])
 
 # Plotagem Combinação 1
 with abas_result[0]:
     col_graf_0, col_graf_90 = st.columns(2)
     
     with col_graf_0:
-        v0_pesq = calc_res_val(cpe_paredes['0']['C'], cpi_positivo, q)
-        v0_pdir = calc_res_val(cpe_paredes['0']['D'], cpi_positivo, q)
+        v0_pesq = calc_res_val(cpe_paredes['0']['C'], cpi_0_pos, q)
+        v0_pdir = calc_res_val(cpe_paredes['0']['D'], cpi_0_pos, q)
         if tipo_telhado == "Duas águas":
-            v0_tesq = calc_res_val(cpe_telhado['0']['EG'], cpi_positivo, q)
-            v0_tdir = calc_res_val(cpe_telhado['0']['FH'], cpi_positivo, q)
+            v0_tesq = calc_res_val(cpe_telhado['0']['EG'], cpi_0_pos, q)
+            v0_tdir = calc_res_val(cpe_telhado['0']['FH'], cpi_0_pos, q)
         else:
-            v0_tesq = calc_res_val(cpe_telhado['0']['H'], cpi_positivo, q); v0_tdir = 0 
+            v0_tesq = calc_res_val(cpe_telhado['0']['H'], cpi_0_pos, q); v0_tdir = 0 
             
-        fig_0 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq, v0_pdir, v0_tesq, v0_tdir, "Vento a 0°", is_vento_90=False, tipo_telhado=tipo_telhado)
+        fig_0 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq, v0_pdir, v0_tesq, v0_tdir, f"Vento a 0° (Cpi = {cpi_0_pos})", is_vento_90=False, tipo_telhado=tipo_telhado)
         st.pyplot(fig_0)
         
     with col_graf_90:
-        v90_pesq = calc_res_val(cpe_paredes['90']['A'], cpi_positivo, q)
-        v90_pdir = calc_res_val(cpe_paredes['90']['B'], cpi_positivo, q)
+        v90_pesq = calc_res_val(cpe_paredes['90']['A'], cpi_90_pos, q)
+        v90_pdir = calc_res_val(cpe_paredes['90']['B'], cpi_90_pos, q)
         if tipo_telhado == "Duas águas":
-            v90_tesq = calc_res_val(cpe_telhado['90']['EF'], cpi_positivo, q)
-            v90_tdir = calc_res_val(cpe_telhado['90']['GH'], cpi_positivo, q)
+            v90_tesq = calc_res_val(cpe_telhado['90']['EF'], cpi_90_pos, q)
+            v90_tdir = calc_res_val(cpe_telhado['90']['GH'], cpi_90_pos, q)
         else:
-            v90_tesq = calc_res_val(cpe_telhado['90']['H'], cpi_positivo, q); v90_tdir = 0
+            v90_tesq = calc_res_val(cpe_telhado['90']['H'], cpi_90_pos, q); v90_tdir = 0
             
-        fig_90 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq, v90_pdir, v90_tesq, v90_tdir, "Vento a 90°", is_vento_90=True, tipo_telhado=tipo_telhado)
+        fig_90 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq, v90_pdir, v90_tesq, v90_tdir, f"Vento a 90° (Cpi = {cpi_90_pos})", is_vento_90=True, tipo_telhado=tipo_telhado)
         st.pyplot(fig_90)
 
 # Plotagem Combinação 2
@@ -412,33 +465,32 @@ with abas_result[1]:
     col_graf_0_c2, col_graf_90_c2 = st.columns(2)
     
     with col_graf_0_c2:
-        v0_pesq_c2 = calc_res_val(cpe_paredes['0']['C'], cpi_negativo, q)
-        v0_pdir_c2 = calc_res_val(cpe_paredes['0']['D'], cpi_negativo, q)
+        v0_pesq_c2 = calc_res_val(cpe_paredes['0']['C'], cpi_0_neg, q)
+        v0_pdir_c2 = calc_res_val(cpe_paredes['0']['D'], cpi_0_neg, q)
         if tipo_telhado == "Duas águas":
-            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['EG'], cpi_negativo, q)
-            v0_tdir_c2 = calc_res_val(cpe_telhado['0']['FH'], cpi_negativo, q)
+            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['EG'], cpi_0_neg, q)
+            v0_tdir_c2 = calc_res_val(cpe_telhado['0']['FH'], cpi_0_neg, q)
         else:
-            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['H'], cpi_negativo, q); v0_tdir_c2 = 0
+            v0_tesq_c2 = calc_res_val(cpe_telhado['0']['H'], cpi_0_neg, q); v0_tdir_c2 = 0
             
-        fig_0_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq_c2, v0_pdir_c2, v0_tesq_c2, v0_tdir_c2, "Vento a 0°", is_vento_90=False, tipo_telhado=tipo_telhado)
+        fig_0_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v0_pesq_c2, v0_pdir_c2, v0_tesq_c2, v0_tdir_c2, f"Vento a 0° (Cpi = {cpi_0_neg})", is_vento_90=False, tipo_telhado=tipo_telhado)
         st.pyplot(fig_0_c2)
         
     with col_graf_90_c2:
-        v90_pesq_c2 = calc_res_val(cpe_paredes['90']['A'], cpi_negativo, q)
-        v90_pdir_c2 = calc_res_val(cpe_paredes['90']['B'], cpi_negativo, q)
+        v90_pesq_c2 = calc_res_val(cpe_paredes['90']['A'], cpi_90_neg, q)
+        v90_pdir_c2 = calc_res_val(cpe_paredes['90']['B'], cpi_90_neg, q)
         if tipo_telhado == "Duas águas":
-            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['EF'], cpi_negativo, q)
-            v90_tdir_c2 = calc_res_val(cpe_telhado['90']['GH'], cpi_negativo, q)
+            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['EF'], cpi_90_neg, q)
+            v90_tdir_c2 = calc_res_val(cpe_telhado['90']['GH'], cpi_90_neg, q)
         else:
-            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['H'], cpi_negativo, q); v90_tdir_c2 = 0
+            v90_tesq_c2 = calc_res_val(cpe_telhado['90']['H'], cpi_90_neg, q); v90_tdir_c2 = 0
             
-        fig_90_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq_c2, v90_pdir_c2, v90_tesq_c2, v90_tdir_c2, "Vento a 90°", is_vento_90=True, tipo_telhado=tipo_telhado)
+        fig_90_c2 = plot_diagrama_esforcos(dim_b, dim_h, dim_h1, v90_pesq_c2, v90_pdir_c2, v90_tesq_c2, v90_tdir_c2, f"Vento a 90° (Cpi = {cpi_90_neg})", is_vento_90=True, tipo_telhado=tipo_telhado)
         st.pyplot(fig_90_c2)
 
 st.divider()
 
-# Botão de Exportação para PDF
-pdf_gerado = gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3, vk, q, tipo_telhado, cpi_positivo, cpi_negativo)
+pdf_gerado = gerar_relatorio_pdf(dim_a, dim_b, dim_h, dim_h1, angulo_beta, v0, s1, s2, s3, vk, q, tipo_telhado, cpi_0_pos, cpi_0_neg, cpi_90_pos, cpi_90_neg)
 st.download_button(
     label="📄 Baixar Relatório de Cálculo (PDF)",
     data=pdf_gerado,
